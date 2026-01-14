@@ -1,5 +1,5 @@
 // API composable for TrueGather backend integration
-import type { Room, JoinResponse, HealthResponse, CreateRoomRequest, JoinRoomRequest } from '~/types'
+import type { Room, JoinResponse, HealthResponse, CreateRoomRequest, JoinRoomRequest, CreateInvitationRequest, CreateInvitationResponse, InvitationInfo, RoomInvitation } from '~/types'
 
 export function useApi() {
     const config = useRuntimeConfig()
@@ -92,12 +92,49 @@ export function useApi() {
         return await $fetch<HealthResponse>(`${healthUrl}/health`)
     }
 
+    /**
+     * Create an invitation link for a room
+     */
+    async function createInvitation(roomId: string, data: CreateInvitationRequest = {}): Promise<CreateInvitationResponse> {
+        return await $fetch<CreateInvitationResponse>(`${baseUrl}/rooms/${roomId}/invite`, {
+            method: 'POST',
+            body: data
+        })
+    }
+
+    /**
+     * Get invitation info by token
+     */
+    async function getInvitation(token: string): Promise<InvitationInfo> {
+        return await $fetch<InvitationInfo>(`${baseUrl}/rooms/invite/${token}`)
+    }
+
+    /**
+     * Use an invitation (increment use count)
+     */
+    async function useInvitation(token: string): Promise<InvitationInfo> {
+        return await $fetch<InvitationInfo>(`${baseUrl}/rooms/invite/${token}/use`, {
+            method: 'POST'
+        })
+    }
+
+    /**
+     * List all invitations for a room
+     */
+    async function listInvitations(roomId: string): Promise<RoomInvitation[]> {
+        return await $fetch<RoomInvitation[]>(`${baseUrl}/rooms/${roomId}/invites`)
+    }
+
     return {
         baseUrl,
         createRoom,
         getRoom,
         joinRoom,
         leaveRoom,
-        getHealth
+        getHealth,
+        createInvitation,
+        getInvitation,
+        useInvitation,
+        listInvitations
     }
 }

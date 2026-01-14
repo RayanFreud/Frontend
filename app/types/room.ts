@@ -59,3 +59,36 @@ export interface ApiError {
     error: string
     code?: string
 }
+
+// Invitation types
+export interface RoomInvitation {
+    token: string
+    room_id: string
+    created_by: string
+    created_at: string
+    expires_at: string
+    max_uses: number | null
+    uses: number
+}
+
+export interface CreateInvitationRequest {
+    ttl_seconds?: number
+    max_uses?: number | null
+}
+
+export interface CreateInvitationResponse {
+    token: string
+    room_id: string
+    expires_at: string
+    max_uses: number | null
+    invite_url: string
+}
+
+export interface InvitationInfo {
+    token: string
+    room_id: string
+    room_name: string
+    expires_at: string
+    is_valid: boolean
+}
+}
