@@ -13,7 +13,7 @@ export interface Room {
 export interface Participant {
     user_id: string
     display: string
-    feed_id?: number
+    feed_id?: string
     is_publishing: boolean
     is_muted: boolean
     is_video_off: boolean
@@ -21,7 +21,7 @@ export interface Participant {
 }
 
 export interface Publisher {
-    feed_id: number
+    feed_id: string
     display: string
     user_id: string
     joined_at: string

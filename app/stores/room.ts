@@ -33,7 +33,7 @@ export const useRoomStore = defineStore('room', () => {
 
     // Participants state
     const participants = ref<Map<string, Participant>>(new Map())
-    const publishers = ref<Map<number, Publisher>>(new Map())
+    const publishers = ref<Map<string, Publisher>>(new Map())
     const localStream = ref<MediaStream | null>(null)
 
     // Settings
@@ -99,13 +99,13 @@ export const useRoomStore = defineStore('room', () => {
                 display
             })
 
-            // Process existing publishers
-            if (joinResult.payload.existing_publishers) {
-                for (const pub of joinResult.payload.existing_publishers) {
-                    publishers.value.set(pub.feed_id, {
-                        feed_id: pub.feed_id,
+            // Process existing publishers (note: backend sends "publishers", not "existing_publishers")
+            if (joinResult.payload.publishers) {
+                for (const pub of joinResult.payload.publishers) {
+                    publishers.value.set(String(pub.feed_id), {
+                        feed_id: String(pub.feed_id),
                         display: pub.display,
-                        user_id: pub.user_id,
+                        user_id: '', // Backend doesn't send user_id in publishers list
                         joined_at: new Date().toISOString()
                     })
                 }
@@ -143,17 +143,17 @@ export const useRoomStore = defineStore('room', () => {
             const payload = message.payload as PublisherJoinedPayload
             console.log('[RoomStore] Publisher joined:', payload)
 
-            publishers.value.set(payload.feed_id, {
-                feed_id: payload.feed_id,
+            publishers.value.set(String(payload.feed_id), {
+                feed_id: String(payload.feed_id),
                 display: payload.display,
-                user_id: payload.user_id,
+                user_id: '', // Backend doesn't always send user_id
                 joined_at: new Date().toISOString()
             })
 
             toastStore.info(`${payload.display} joined the room`)
 
             // Auto-subscribe to new publisher
-            subscribeToPublisher(payload.feed_id, payload.display, payload.user_id)
+            subscribeToPublisher(String(payload.feed_id), payload.display, '')
         })
 
         // Publisher left
@@ -175,21 +175,21 @@ export const useRoomStore = defineStore('room', () => {
             if (payload.feed_id) {
                 await subscriber.addIceCandidate(payload.feed_id, {
                     candidate: payload.candidate,
-                    sdpMid: payload.sdpMid,
-                    sdpMLineIndex: payload.sdpMLineIndex
+                    sdpMid: payload.sdp_mid,
+                    sdpMLineIndex: payload.sdp_mline_index
                 })
             } else {
                 await publisher.addIceCandidate({
                     candidate: payload.candidate,
-                    sdpMid: payload.sdpMid,
-                    sdpMLineIndex: payload.sdpMLineIndex
+                    sdpMid: payload.sdp_mid,
+                    sdpMLineIndex: payload.sdp_mline_index
                 })
             }
         })
 
         // Errors
         signaling.on('error', (message) => {
-            const payload = message.payload as { code: string; message: string }
+            const payload = message.payload as { code: number; message: string }
             console.error('[RoomStore] Signaling error:', payload)
             toastStore.error(payload.message)
         })
@@ -212,8 +212,8 @@ export const useRoomStore = defineStore('room', () => {
             publisher.onIceCandidate((candidate) => {
                 signaling.send('trickle_ice', {
                     candidate: candidate.candidate,
-                    sdpMid: candidate.sdpMid,
-                    sdpMLineIndex: candidate.sdpMLineIndex,
+                    sdp_mid: candidate.sdpMid,
+                    sdp_mline_index: candidate.sdpMLineIndex,
                     target: 'publisher'
                 })
             })
@@ -254,10 +254,10 @@ export const useRoomStore = defineStore('room', () => {
     /**
      * Subscribe to a remote publisher
      */
-    async function subscribeToPublisher(feedId: number, display: string, publisherUserId: string): Promise<void> {
+    async function subscribeToPublisher(feedId: string, display: string, publisherUserId: string): Promise<void> {
         try {
             // Request subscription offer from server
-            const offerResponse = await signaling.sendRequest<SignalingMessage<{ sdp: string; feed_ids: number[] }>>('subscribe', {
+            const offerResponse = await signaling.sendRequest<SignalingMessage<{ sdp: string; feed_ids: string[] }>>('subscribe', {
                 feeds: [{ feed_id: feedId }]
             })
 
@@ -265,8 +265,8 @@ export const useRoomStore = defineStore('room', () => {
             subscriber.onIceCandidate((fId, candidate) => {
                 signaling.send('trickle_ice', {
                     candidate: candidate.candidate,
-                    sdpMid: candidate.sdpMid,
-                    sdpMLineIndex: candidate.sdpMLineIndex,
+                    sdp_mid: candidate.sdpMid,
+                    sdp_mline_index: candidate.sdpMLineIndex,
                     target: 'subscriber',
                     feed_id: fId
                 })
@@ -371,7 +371,7 @@ export const useRoomStore = defineStore('room', () => {
     /**
      * Get remote stream for a feed
      */
-    function getRemoteStream(feedId: number): MediaStream | null {
+    function getRemoteStream(feedId: string): MediaStream | null {
         return subscriber.getRemoteStream(feedId)
     }
 

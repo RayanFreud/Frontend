@@ -1,17 +1,5 @@
-// Mock API composable for development without backend
+// API composable for TrueGather backend integration
 import type { Room, JoinResponse, HealthResponse, CreateRoomRequest, JoinRoomRequest } from '~/types'
-
-// Mock data store
-const mockRooms = new Map<string, Room>()
-
-// Generate UUIDs
-function generateUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = Math.random() * 16 | 0
-        const v = c === 'x' ? r : (r & 0x3 | 0x8)
-        return v.toString(16)
-    })
-}
 
 export function useApi() {
     const config = useRuntimeConfig()
@@ -21,67 +9,68 @@ export function useApi() {
      * Create a new room
      */
     async function createRoom(data: CreateRoomRequest): Promise<Room> {
-        // Mock implementation
-        const room: Room = {
-            room_id: generateUUID(),
-            name: data.name,
-            created_at: new Date().toISOString(),
-            max_publishers: data.max_publishers || 10,
+        const response = await $fetch<{
+            room_id: string
+            name: string
+            created_at: string
+            max_publishers: number
+        }>(`${baseUrl}/rooms`, {
+            method: 'POST',
+            body: data
+        })
+
+        return {
+            room_id: response.room_id,
+            name: response.name,
+            created_at: response.created_at,
+            max_publishers: response.max_publishers,
             status: 'active',
             participants_count: 0,
             ttl_seconds: data.ttl_seconds || 7200
         }
-
-        mockRooms.set(room.room_id, room)
-
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 300))
-
-        return room
     }
 
     /**
      * Get room details
      */
     async function getRoom(roomId: string): Promise<Room> {
-        await new Promise(resolve => setTimeout(resolve, 200))
-
-        const room = mockRooms.get(roomId)
-        if (!room) {
-            throw new Error('Room not found')
-        }
-
-        return room
+        return await $fetch<Room>(`${baseUrl}/rooms/${roomId}`)
     }
 
     /**
      * Join a room
      */
     async function joinRoom(roomId: string, data: JoinRoomRequest): Promise<JoinResponse> {
-        await new Promise(resolve => setTimeout(resolve, 300))
+        const response = await $fetch<{
+            room_id: string
+            user_id: string
+            ws_url: string
+            token: string
+            ice_servers: Array<{
+                urls: string[]
+                username?: string
+                credential?: string
+            }>
+            expires_in: number
+        }>(`${baseUrl}/rooms/${roomId}/join`, {
+            method: 'POST',
+            body: data
+        })
 
-        const room = mockRooms.get(roomId)
-        if (!room) {
-            throw new Error('Room not found')
-        }
-
-        // Update participants count
-        room.participants_count++
-
-        const userId = generateUUID()
-        const token = `mock-jwt-token-${userId}-${Date.now()}`
+        // Map ice_servers to RTCIceServer format
+        const iceServers: RTCIceServer[] = response.ice_servers.map(server => ({
+            urls: server.urls,
+            username: server.username,
+            credential: server.credential
+        }))
 
         return {
-            room_id: roomId,
-            user_id: userId,
-            ws_url: `ws://localhost:8080/ws?room_id=${roomId}&token=${token}`,
-            token,
-            ice_servers: [
-                {
-                    urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
-                }
-            ],
-            expires_in: 900
+            room_id: response.room_id,
+            user_id: response.user_id,
+            ws_url: response.ws_url,
+            token: response.token,
+            ice_servers: iceServers,
+            expires_in: response.expires_in
         }
     }
 
@@ -89,34 +78,18 @@ export function useApi() {
      * Leave a room
      */
     async function leaveRoom(roomId: string, _token: string): Promise<void> {
-        await new Promise(resolve => setTimeout(resolve, 100))
-
-        const room = mockRooms.get(roomId)
-        if (room && room.participants_count > 0) {
-            room.participants_count--
-        }
+        await $fetch(`${baseUrl}/rooms/${roomId}/leave`, {
+            method: 'POST'
+        })
     }
 
     /**
      * Get server health
      */
     async function getHealth(): Promise<HealthResponse> {
-        await new Promise(resolve => setTimeout(resolve, 100))
-
-        return {
-            status: 'healthy',
-            redis: 'connected',
-            janus: 'connected',
-            timestamp: new Date().toISOString()
-        }
-    }
-
-    /**
-     * List all rooms (mock only)
-     */
-    async function listRooms(): Promise<Room[]> {
-        await new Promise(resolve => setTimeout(resolve, 200))
-        return Array.from(mockRooms.values())
+        // Health endpoint is at root, not under /api/v1
+        const healthUrl = baseUrl.replace('/api/v1', '')
+        return await $fetch<HealthResponse>(`${healthUrl}/health`)
     }
 
     return {
@@ -125,7 +98,6 @@ export function useApi() {
         getRoom,
         joinRoom,
         leaveRoom,
-        getHealth,
-        listRooms
+        getHealth
     }
 }

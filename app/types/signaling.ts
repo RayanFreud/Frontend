@@ -23,18 +23,18 @@ export interface PublishOfferPayload {
 
 export interface TrickleIcePayload {
     candidate: string
-    sdpMid?: string
-    sdpMLineIndex?: number
+    sdp_mid?: string
+    sdp_mline_index?: number
     target?: 'publisher' | 'subscriber'
-    feed_id?: number
+    feed_id?: string
 }
 
 export interface SubscribePayload {
-    feeds: Array<{ feed_id: number; mid?: string }>
+    feeds: Array<{ feed_id: string; mid?: string }>
 }
 
 export interface UnsubscribePayload {
-    feed_ids: number[]
+    feed_ids: string[]
 }
 
 export interface SubscribeAnswerPayload {
@@ -58,22 +58,20 @@ export type ClientMessageType =
 export interface JoinedPayload {
     room_id: string
     user_id: string
-    existing_publishers: Array<{
-        feed_id: number
+    publishers: Array<{
+        feed_id: string
         display: string
-        user_id: string
     }>
 }
 
 export interface PublisherJoinedPayload {
-    feed_id: number
+    feed_id: string
     display: string
     room_id: string
-    user_id: string
 }
 
 export interface PublisherLeftPayload {
-    feed_id: number
+    feed_id: string
     room_id: string
 }
 
@@ -83,18 +81,18 @@ export interface PublishAnswerPayload {
 
 export interface SubscribeOfferPayload {
     sdp: string
-    feed_ids: number[]
+    feed_ids: string[]
 }
 
 export interface RemoteCandidatePayload {
     candidate: string
-    sdpMid?: string
-    sdpMLineIndex?: number
-    feed_id?: number
+    sdp_mid?: string
+    sdp_mline_index?: number
+    feed_id?: string
 }
 
 export interface ErrorPayload {
-    code: string
+    code: number
     message: string
 }
 

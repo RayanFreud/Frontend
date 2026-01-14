@@ -1,19 +1,8 @@
-// WebSocket Signaling Composable with Mock Support
+// WebSocket Signaling Composable for TrueGather
 import type {
     SignalingMessage,
-    JoinRoomPayload,
-    PublishOfferPayload,
-    TrickleIcePayload,
-    SubscribePayload,
-    SubscribeAnswerPayload,
-    JoinedPayload,
-    PublisherJoinedPayload,
-    PublisherLeftPayload,
-    PublishAnswerPayload,
-    SubscribeOfferPayload,
-    RemoteCandidatePayload,
-    ErrorPayload,
-    ServerMessage
+    ServerMessage,
+    ErrorPayload
 } from '~/types'
 
 type MessageHandler = (message: ServerMessage) => void
@@ -24,28 +13,25 @@ interface PendingRequest {
     timeout: ReturnType<typeof setTimeout>
 }
 
+// Shared State (Singleton)
+const ws = ref<WebSocket | null>(null)
+const isConnected = ref(false)
+const isConnecting = ref(false)
+const connectionError = ref<string | null>(null)
+
+// Internal shared state
+const pendingRequests = new Map<string, PendingRequest>()
+const messageHandlers = new Map<string, Set<MessageHandler>>()
+const REQUEST_TIMEOUT = 30000
+
+// Reconnection state
+let reconnectAttempts = 0
+const MAX_RECONNECT_ATTEMPTS = 5
+const INITIAL_BACKOFF = 1000
+let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+let currentWsUrl: string | null = null
+
 export function useSignalingWs() {
-    // State
-    const ws = ref<WebSocket | null>(null)
-    const isConnected = ref(false)
-    const isConnecting = ref(false)
-    const connectionError = ref<string | null>(null)
-
-    // Internal state
-    const pendingRequests = new Map<string, PendingRequest>()
-    const messageHandlers = new Map<string, Set<MessageHandler>>()
-    const REQUEST_TIMEOUT = 30000
-
-    // Reconnection state
-    let reconnectAttempts = 0
-    const MAX_RECONNECT_ATTEMPTS = 5
-    const INITIAL_BACKOFF = 1000
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
-
-    // Mock mode state
-    let mockMode = true
-    const mockPublishers = new Map<number, { display: string; user_id: string }>()
-    let mockFeedIdCounter = 1
 
     /**
      * Generate unique request ID
@@ -58,26 +44,27 @@ export function useSignalingWs() {
      * Connect to WebSocket server
      */
     async function connect(wsUrl: string): Promise<void> {
-        if (isConnected.value || isConnecting.value) {
+        // If already connected to the same URL, do nothing
+        if (isConnected.value && currentWsUrl === wsUrl) {
+            console.log('[SignalingWS] Already connected to', wsUrl)
             return
         }
 
-        // Check if we should use mock mode
-        mockMode = wsUrl.includes('localhost') || wsUrl.includes('mock')
-
-        if (mockMode) {
-            console.log('[SignalingWS] Using mock mode')
-            isConnected.value = true
-            isConnecting.value = false
-            reconnectAttempts = 0
+        if (isConnecting.value) {
             return
         }
 
+        currentWsUrl = wsUrl
         isConnecting.value = true
         connectionError.value = null
 
         return new Promise((resolve, reject) => {
             try {
+                console.log('[SignalingWS] Connecting to:', wsUrl)
+                if (ws.value) {
+                    ws.value.close()
+                }
+
                 ws.value = new WebSocket(wsUrl)
 
                 ws.value.onopen = () => {
@@ -94,8 +81,8 @@ export function useSignalingWs() {
                     isConnecting.value = false
 
                     // Attempt reconnect if not intentional close
-                    if (event.code !== 1000 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                        scheduleReconnect(wsUrl)
+                    if (event.code !== 1000 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS && currentWsUrl) {
+                        scheduleReconnect(currentWsUrl)
                     }
                 }
 
@@ -140,6 +127,7 @@ export function useSignalingWs() {
     function handleMessage(data: string) {
         try {
             const message = JSON.parse(data) as ServerMessage
+            console.log('[SignalingWS] Received:', message.type, message)
 
             // Handle request/response correlation
             if (message.request_id && pendingRequests.has(message.request_id)) {
@@ -177,11 +165,6 @@ export function useSignalingWs() {
     async function sendRequest<T>(type: string, payload: unknown): Promise<T> {
         const requestId = generateRequestId()
 
-        // Mock mode handling
-        if (mockMode) {
-            return handleMockRequest<T>(type, payload, requestId)
-        }
-
         if (!ws.value || !isConnected.value) {
             throw new Error('WebSocket not connected')
         }
@@ -191,6 +174,8 @@ export function useSignalingWs() {
             request_id: requestId,
             payload
         }
+
+        console.log('[SignalingWS] Sending:', type, message)
 
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -205,122 +190,9 @@ export function useSignalingWs() {
     }
 
     /**
-     * Handle mock requests
-     */
-    async function handleMockRequest<T>(type: string, payload: unknown, requestId: string): Promise<T> {
-        await new Promise(resolve => setTimeout(resolve, 100))
-
-        switch (type) {
-            case 'join_room': {
-                const p = payload as JoinRoomPayload
-                const response: SignalingMessage<JoinedPayload> & { type: 'joined' } = {
-                    type: 'joined',
-                    request_id: requestId,
-                    payload: {
-                        room_id: p.room_id,
-                        user_id: `user_${Date.now()}`,
-                        existing_publishers: Array.from(mockPublishers.entries()).map(([feed_id, data]) => ({
-                            feed_id,
-                            display: data.display,
-                            user_id: data.user_id
-                        }))
-                    }
-                }
-                return response as T
-            }
-
-            case 'publish_offer': {
-                // Create a mock SDP answer
-                const response: SignalingMessage<PublishAnswerPayload> & { type: 'publish_answer' } = {
-                    type: 'publish_answer',
-                    request_id: requestId,
-                    payload: {
-                        sdp: createMockSdpAnswer()
-                    }
-                }
-
-                // Simulate publisher joined event for other participants
-                const feedId = mockFeedIdCounter++
-                mockPublishers.set(feedId, { display: 'Local User', user_id: `user_${Date.now()}` })
-
-                return response as T
-            }
-
-            case 'subscribe': {
-                const response: SignalingMessage<SubscribeOfferPayload> & { type: 'subscribe_offer' } = {
-                    type: 'subscribe_offer',
-                    request_id: requestId,
-                    payload: {
-                        sdp: createMockSdpOffer(),
-                        feed_ids: (payload as SubscribePayload).feeds.map(f => f.feed_id)
-                    }
-                }
-                return response as T
-            }
-
-            case 'leave': {
-                return { type: 'left', payload: { success: true } } as T
-            }
-
-            case 'ping': {
-                return { type: 'pong', payload: {} } as T
-            }
-
-            default:
-                throw new Error(`Unknown message type: ${type}`)
-        }
-    }
-
-    /**
-     * Create mock SDP answer
-     */
-    function createMockSdpAnswer(): string {
-        return `v=0
-o=- ${Date.now()} 2 IN IP4 127.0.0.1
-s=-
-t=0 0
-a=group:BUNDLE 0 1
-a=msid-semantic: WMS
-m=audio 9 UDP/TLS/RTP/SAVPF 111
-c=IN IP4 0.0.0.0
-a=rtcp:9 IN IP4 0.0.0.0
-a=ice-ufrag:mock
-a=ice-pwd:mockmockmockmockmock
-a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
-a=setup:active
-a=mid:0
-a=recvonly
-a=rtcp-mux
-a=rtpmap:111 opus/48000/2
-m=video 9 UDP/TLS/RTP/SAVPF 96
-c=IN IP4 0.0.0.0
-a=rtcp:9 IN IP4 0.0.0.0
-a=ice-ufrag:mock
-a=ice-pwd:mockmockmockmockmock
-a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
-a=setup:active
-a=mid:1
-a=recvonly
-a=rtcp-mux
-a=rtpmap:96 VP8/90000`
-    }
-
-    /**
-     * Create mock SDP offer
-     */
-    function createMockSdpOffer(): string {
-        return createMockSdpAnswer().replace('recvonly', 'sendonly')
-    }
-
-    /**
      * Send a message without waiting for response
      */
     function send(type: string, payload: unknown): void {
-        if (mockMode) {
-            console.log('[SignalingWS Mock] Send:', type, payload)
-            return
-        }
-
         if (!ws.value || !isConnected.value) {
             throw new Error('WebSocket not connected')
         }
@@ -330,6 +202,7 @@ a=rtpmap:96 VP8/90000`
             payload
         }
 
+        console.log('[SignalingWS] Sending (fire-and-forget):', type, message)
         ws.value.send(JSON.stringify(message))
     }
 
@@ -362,11 +235,7 @@ a=rtpmap:96 VP8/90000`
             reconnectTimeout = null
         }
 
-        if (mockMode) {
-            isConnected.value = false
-            mockPublishers.clear()
-            return
-        }
+        currentWsUrl = null
 
         if (ws.value) {
             ws.value.close(1000, 'Client disconnect')
@@ -383,32 +252,6 @@ a=rtpmap:96 VP8/90000`
         pendingRequests.clear()
     }
 
-    /**
-     * Simulate a remote publisher joining (mock only)
-     */
-    function simulatePublisherJoined(display: string): void {
-        if (!mockMode) return
-
-        const feedId = mockFeedIdCounter++
-        const userId = `user_${Date.now()}`
-        mockPublishers.set(feedId, { display, user_id: userId })
-
-        const message: SignalingMessage<PublisherJoinedPayload> & { type: 'publisher_joined' } = {
-            type: 'publisher_joined',
-            payload: {
-                feed_id: feedId,
-                display,
-                room_id: 'mock-room',
-                user_id: userId
-            }
-        }
-
-        const handlers = messageHandlers.get('publisher_joined')
-        if (handlers) {
-            handlers.forEach(handler => handler(message))
-        }
-    }
-
     return {
         // State
         isConnected: readonly(isConnected),
@@ -421,9 +264,6 @@ a=rtpmap:96 VP8/90000`
         sendRequest,
         send,
         on,
-        off,
-
-        // Mock helpers
-        simulatePublisherJoined
+        off
     }
 }

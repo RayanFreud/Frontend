@@ -1,7 +1,7 @@
 // WebRTC Subscriber Composable
 
 export interface Subscription {
-    feedId: number
+    feedId: string
     pc: RTCPeerConnection
     remoteStream: MediaStream | null
     display: string
@@ -10,15 +10,15 @@ export interface Subscription {
 
 export function useWebRtcSubscriber() {
     // State - map of feed_id to subscription
-    const subscriptions = ref<Map<number, Subscription>>(new Map())
+    const subscriptions = ref<Map<string, Subscription>>(new Map())
 
     // ICE servers (set during initialization)
     let iceServers: RTCIceServer[] = []
 
     // Event callbacks
-    let onRemoteStreamCallback: ((feedId: number, stream: MediaStream) => void) | null = null
-    let onIceCandidateCallback: ((feedId: number, candidate: RTCIceCandidate) => void) | null = null
-    let onConnectionStateChangeCallback: ((feedId: number, state: RTCPeerConnectionState) => void) | null = null
+    let onRemoteStreamCallback: ((feedId: string, stream: MediaStream) => void) | null = null
+    let onIceCandidateCallback: ((feedId: string, candidate: RTCIceCandidate) => void) | null = null
+    let onConnectionStateChangeCallback: ((feedId: string, state: RTCPeerConnectionState) => void) | null = null
 
     /**
      * Set ICE servers for all subscriptions
@@ -32,7 +32,7 @@ export function useWebRtcSubscriber() {
      * Create subscription for a remote feed
      */
     async function subscribe(
-        feedId: number,
+        feedId: string,
         offerSdp: string,
         display: string,
         userId: string
@@ -108,7 +108,7 @@ export function useWebRtcSubscriber() {
     /**
      * Add ICE candidate for a subscription
      */
-    async function addIceCandidate(feedId: number, candidate: RTCIceCandidateInit): Promise<void> {
+    async function addIceCandidate(feedId: string, candidate: RTCIceCandidateInit): Promise<void> {
         const subscription = subscriptions.value.get(feedId)
         if (!subscription) {
             console.warn('[WebRTC Subscriber] No subscription for feed:', feedId)
@@ -122,7 +122,7 @@ export function useWebRtcSubscriber() {
     /**
      * Get remote stream for a feed
      */
-    function getRemoteStream(feedId: number): MediaStream | null {
+    function getRemoteStream(feedId: string): MediaStream | null {
         const subscription = subscriptions.value.get(feedId)
         return subscription?.remoteStream ?? null
     }
@@ -137,7 +137,7 @@ export function useWebRtcSubscriber() {
     /**
      * Unsubscribe from a feed
      */
-    function unsubscribe(feedId: number): void {
+    function unsubscribe(feedId: string): void {
         const subscription = subscriptions.value.get(feedId)
         if (!subscription) return
 
@@ -157,21 +157,21 @@ export function useWebRtcSubscriber() {
     /**
      * Set callback for remote streams
      */
-    function onRemoteStream(callback: (feedId: number, stream: MediaStream) => void): void {
+    function onRemoteStream(callback: (feedId: string, stream: MediaStream) => void): void {
         onRemoteStreamCallback = callback
     }
 
     /**
      * Set callback for ICE candidates
      */
-    function onIceCandidate(callback: (feedId: number, candidate: RTCIceCandidate) => void): void {
+    function onIceCandidate(callback: (feedId: string, candidate: RTCIceCandidate) => void): void {
         onIceCandidateCallback = callback
     }
 
     /**
      * Set callback for connection state changes
      */
-    function onConnectionStateChange(callback: (feedId: number, state: RTCPeerConnectionState) => void): void {
+    function onConnectionStateChange(callback: (feedId: string, state: RTCPeerConnectionState) => void): void {
         onConnectionStateChangeCallback = callback
     }
 
