@@ -29,7 +29,6 @@ const meetingId = computed(() => roomStore.roomId || '')
 // Get participants as array
 const participants = computed(() => Array.from(roomStore.participants.values()))
 const publishers = computed(() => Array.from(roomStore.publishers.values()))
-
 // Participants excluding self
 const otherParticipants = computed(() => {
   const selfId = roomStore.userId
@@ -230,6 +229,7 @@ async function sendInviteEmail() {
       >
         <Avatar :name="p.display" size="sm" status="online" />
 
+        
         <div class="flex-1 min-w-0">
           <p class="font-medium text-text-primary truncate">
             {{ p.display }}

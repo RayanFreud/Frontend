@@ -49,30 +49,30 @@ export function useApi() {
     return await $fetch<Room>(`${baseUrl}/rooms/${roomId}`)
   }
 
-  /**
-   * Join a room
-   */
-  async function joinRoom(roomId: string, data: JoinRoomRequest): Promise<JoinResponse> {
-    const response = await $fetch<{
-      room_id: string
-      user_id: string
-      ws_url: string
-      token: string
-      ice_servers: Array<{
-        urls: string[]
-        username?: string
-        credential?: string
-      }>
-      expires_in: number
-            participants?: Array<{
-                user_id: string
-                display: string
-                joined_at: string | number
+    /**
+     * Join a room
+     */
+    async function joinRoom(roomId: string, data: JoinRoomRequest): Promise<JoinResponse> {
+        const response = await $fetch<{
+            room_id: string
+            user_id: string
+            ws_url: string
+            token: string
+            ice_servers: Array<{
+                urls: string[]
+                username?: string
+                credential?: string
             }>
-    }>(`${baseUrl}/rooms/${roomId}/join`, {
-      method: 'POST',
-      body: data,
-    })
+            expires_in: number
+                  paricipants?: Array<{
+                    user_id: string
+                    display: string
+                    joined_at: string | number
+                  }>
+        }>(`${baseUrl}/rooms/${roomId}/join`, {
+            method: 'POST',
+            body: data,
+        })
 
     // Map ice_servers to RTCIceServer format
     const iceServers: RTCIceServer[] = response.ice_servers.map((server) => ({
@@ -153,32 +153,31 @@ export function useApi() {
     })
   }
 
-  /**
-   * List all invitations for a room
-   */
-  async function listInvitations(roomId: string): Promise<RoomInvitation[]> {
-    return await $fetch<RoomInvitation[]>(`${baseUrl}/rooms/${roomId}/invites`)
-  }
+    /**
+     * List all invitations for a room
+     */
+    async function listInvitations(roomId: string): Promise<RoomInvitation[]> {
+        return await $fetch<RoomInvitation[]>(`${baseUrl}/rooms/${roomId}/invites`)
+    }
 
     /**
      * Get room media status (publishers & subscribers) for debugging
      */
     async function getMediaStatus(roomId: string): Promise<any> {
         return await $fetch<any>(`${baseUrl}/rooms/${roomId}/media_status`)
-    }
+    }    
 
-  return {
-    baseUrl,
-    createRoom,
-    getRoom,
-    joinRoom,
-    leaveRoom,
-    getHealth,
-    createInvitation,
-    sendInviteEmail,
-    getInvitation,
-    useInvitation,
-    listInvitations,,
-        getMediaStatus
-  }
+    return {
+        baseUrl,
+        createRoom,
+        getRoom,
+        joinRoom,
+        leaveRoom,
+        getHealth,
+        createInvitation,
+        sendInviteEmail,
+        getInvitation,
+        useInvitation,
+        listInvitations
+    }
 }
