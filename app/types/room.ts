@@ -92,3 +92,20 @@ export interface InvitationInfo {
     is_valid: boolean
 }
 }
+
+
+// Invite email types (server-side)
+export interface InviteEmailRequest {
+    emails: string[]
+    ttl_seconds?: number
+    max_uses?: number | null
+    subject?: string
+    message?: string
+}
+
+export interface InviteEmailResponse {
+    sent: number
+    token: string
+    invite_url: string
+    room_id: string
+}
