@@ -13,6 +13,15 @@ const maxParticipants = ref(10)
 const enableTranscription = ref(false)
 const isCreating = ref(false)
 
+function setCreatorKey(roomId: string, creatorKey: string) {
+  try {
+    localStorage.setItem(`tg:creator_key:${roomId}`, creatorKey)
+  } catch (e) {
+    // not fatal; just means host-join without code won't work on this machine
+    console.warn('Failed to store creator key in localStorage', e)
+  }
+}
+
 async function handleCreate() {
   if (!roomName.value.trim()) {
     toastStore.warning('Please enter a meeting name')
@@ -20,13 +29,18 @@ async function handleCreate() {
   }
 
   isCreating.value = true
-  
+
   try {
     const room = await api.createRoom({
       name: roomName.value,
       max_publishers: maxParticipants.value
     })
-    
+
+    // store host-only secret locally (MVP)
+    if (room.creator_key) {
+      setCreatorKey(room.room_id, room.creator_key)
+    }
+
     toastStore.success('Meeting created successfully')
     router.push(`/room/${room.room_id}/lobby`)
   } catch (error) {
@@ -47,14 +61,13 @@ async function handleCreate() {
         <Icon name="heroicons:arrow-left" class="w-4 h-4" />
         Back to home
       </NuxtLink>
-      
+
       <h1 class="text-2xl font-bold text-text-primary">Create Meeting</h1>
       <p class="text-text-secondary">Set up your secure video conference</p>
     </div>
 
     <BaseCard padding="lg">
       <form class="space-y-6" @submit.prevent="handleCreate">
-        <!-- Meeting name -->
         <BaseInput
           v-model="roomName"
           label="Meeting Name"
@@ -62,7 +75,6 @@ async function handleCreate() {
           icon="heroicons:pencil"
         />
 
-        <!-- Max participants -->
         <div>
           <label class="block text-sm font-medium text-text-secondary mb-1.5">
             Maximum Participants
@@ -78,7 +90,6 @@ async function handleCreate() {
           </select>
         </div>
 
-        <!-- Transcription toggle -->
         <div class="flex items-center justify-between p-4 rounded-xl bg-bg-elevated">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
@@ -106,7 +117,6 @@ async function handleCreate() {
           </button>
         </div>
 
-        <!-- Privacy notice -->
         <div class="flex items-start gap-3 p-4 rounded-xl bg-accent/10 border border-accent/30">
           <Icon name="heroicons:shield-check" class="w-5 h-5 text-accent shrink-0 mt-0.5" />
           <div>
@@ -117,7 +127,6 @@ async function handleCreate() {
           </div>
         </div>
 
-        <!-- Submit button -->
         <BaseButton
           class="w-full"
           size="lg"

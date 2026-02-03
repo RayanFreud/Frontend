@@ -5,15 +5,28 @@ definePageMeta({
 
 const router = useRouter()
 const api = useApi()
+const toast = useToastStore()
 
 // State
 const recentRooms = ref<any[]>([])
 const isLoading = ref(true)
 
-// Load recent rooms
+// Join modal state
+const showJoinModal = ref(false)
+const meetingIdInput = ref('')
+const isVerifyingMeeting = ref(false)
+
+// Load recent rooms 
 onMounted(async () => {
   try {
-    recentRooms.value = await api.listRooms()
+    const maybeListRooms = (api as any).listRooms
+    if (typeof maybeListRooms === 'function') {
+      recentRooms.value = await maybeListRooms()
+    } else {
+      // Pas bloquant pour Join Meeting
+      recentRooms.value = []
+      console.warn('[Dashboard] api.listRooms() is not implemented yet.')
+    }
   } catch (error) {
     console.error('Failed to load rooms:', error)
   } finally {
@@ -29,6 +42,55 @@ function formatDate(dateString: string) {
     minute: '2-digit'
   })
 }
+
+function openJoinModal() {
+  meetingIdInput.value = ''
+  showJoinModal.value = true
+}
+
+function closeJoinModal() {
+  showJoinModal.value = false
+  meetingIdInput.value = ''
+}
+
+/**
+ * Permet de coller:
+ * - un UUID brut
+ * - OU une URL contenant /room/<uuid>
+ */
+function extractRoomId(raw: string): string {
+  const value = raw.trim()
+  const uuidRegex =
+    /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
+
+  const match = value.match(uuidRegex)
+  return match ? match[0] : value
+}
+
+async function handleJoinFromDashboard() {
+  const roomId = extractRoomId(meetingIdInput.value)
+
+  const isUuid =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(roomId)
+
+  if (!roomId || !isUuid) {
+    toast.warning('Entre un Meeting ID valide (UUID).')
+    return
+  }
+
+  isVerifyingMeeting.value = true
+  try {
+    // Vérifie que la room existe côté backend
+    await api.getRoom(roomId)
+
+    closeJoinModal()
+    router.push(`/room/${roomId}/lobby`)
+  } catch (error) {
+    toast.error("Meeting introuvable (vérifie l'ID).")
+  } finally {
+    isVerifyingMeeting.value = false
+  }
+}
 </script>
 
 <template>
@@ -39,7 +101,7 @@ function formatDate(dateString: string) {
         <h1 class="text-2xl font-bold text-text-primary">Dashboard</h1>
         <p class="text-text-secondary">Manage your meetings and view history</p>
       </div>
-      
+
       <NuxtLink to="/create">
         <BaseButton>
           <Icon name="heroicons:plus" class="w-5 h-5" />
@@ -70,7 +132,8 @@ function formatDate(dateString: string) {
         </div>
       </BaseCard>
 
-      <BaseCard hover class="flex items-center gap-4">
+      <!-- Join Meeting (maintenant clickable) -->
+      <BaseCard hover class="flex items-center gap-4" @click="openJoinModal">
         <div class="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center">
           <Icon name="heroicons:arrow-right-on-rectangle" class="w-6 h-6 text-green-400" />
         </div>
@@ -140,5 +203,35 @@ function formatDate(dateString: string) {
         </BaseCard>
       </div>
     </div>
+
+    <!-- Join Meeting Modal -->
+    <BaseModal v-model="showJoinModal" title="Join Meeting" size="md">
+      <div class="space-y-4">
+        <BaseInput
+          v-model="meetingIdInput"
+          label="Meeting ID"
+          placeholder="Paste meeting ID (UUID) or a meeting link"
+          icon="heroicons:link"
+        />
+
+        <p class="text-sm text-text-secondary">
+          Tip: tu peux coller un lien complet, on extrait automatiquement l’ID.
+        </p>
+      </div>
+
+      <template #footer>
+        <BaseButton variant="secondary" @click="closeJoinModal" :disabled="isVerifyingMeeting">
+          Cancel
+        </BaseButton>
+
+        <BaseButton
+          @click="handleJoinFromDashboard"
+          :loading="isVerifyingMeeting"
+          :disabled="!meetingIdInput.trim()"
+        >
+          Join
+        </BaseButton>
+      </template>
+    </BaseModal>
   </div>
 </template>
