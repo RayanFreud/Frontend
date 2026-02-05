@@ -19,13 +19,16 @@ export function useApi() {
 
   /**
    * Create a new room
+   * Backend returns creator_key (host-only, returned once)
    */
-  async function createRoom(data: CreateRoomRequest): Promise<Room> {
+  async function createRoom(data: CreateRoomRequest): Promise<Room & { creator_key?: string }> {
     const response = await $fetch<{
       room_id: string
       name: string
       created_at: string
       max_publishers: number
+      ttl_seconds: number
+      creator_key: string
     }>(`${baseUrl}/rooms`, {
       method: 'POST',
       body: data,
@@ -38,7 +41,8 @@ export function useApi() {
       max_publishers: response.max_publishers,
       status: 'active',
       participants_count: 0,
-      ttl_seconds: data.ttl_seconds || 7200,
+      ttl_seconds: response.ttl_seconds,
+      creator_key: response.creator_key,
     }
   }
 
@@ -50,10 +54,19 @@ export function useApi() {
   }
 
   /**
+   * List recent rooms
+   */
+  async function listRooms(limit = 20): Promise<Room[]> {
+    return await $fetch<Room[]>(`${baseUrl}/rooms`, {
+      method: 'GET',
+      query: { limit },
+    })
+  }
+
+  /**
    * Join a room
    */
-  async function joinRoom(roomId: string, data: JoinRoomRequest): Promise<JoinResponse> {
-    const response = await $fetch<{
+  type JoinRoomApiResponse = {
       room_id: string
       user_id: string
       ws_url: string
@@ -64,15 +77,17 @@ export function useApi() {
         credential?: string
       }>
       expires_in: number
-            participants?: Array<{
-                user_id: string
-                display: string
-                joined_at: string | number
-            }>
-    }>(`${baseUrl}/rooms/${roomId}/join`, {
-      method: 'POST',
-      body: data,
-    })
+      participants?: Array<{
+        user_id: string
+        display: string
+        joined_at: string | number
+      }>
+    }
+    async function joinRoom(roomId: string, data: JoinRoomRequest): Promise<JoinResponse> {
+        const response = await $fetch<JoinRoomApiResponse>(`${baseUrl}/rooms/${roomId}/join`, {
+          method: 'POST',
+          body: data,
+        })
 
     // Map ice_servers to RTCIceServer format
     const iceServers: RTCIceServer[] = response.ice_servers.map((server) => ({
@@ -88,7 +103,7 @@ export function useApi() {
       token: response.token,
       ice_servers: iceServers,
       expires_in: response.expires_in,
-            participants: response.participants,
+      participants: response.participants,
     }
   }
 
@@ -103,15 +118,17 @@ export function useApi() {
 
   /**
    * Get server health
+   * Health endpoint is at root, not under /api/v1
    */
   async function getHealth(): Promise<HealthResponse> {
-    // Health endpoint is at root, not under /api/v1
     const healthUrl = baseUrl.replace('/api/v1', '')
     return await $fetch<HealthResponse>(`${healthUrl}/health`)
   }
 
   /**
-   * Create an invitation link for a room
+   * Create an invitation token
+   * NOTE: This endpoint does NOT return the code (security).
+   * The code is sent via invite-email endpoint.
    */
   async function createInvitation(
     roomId: string,
@@ -124,13 +141,10 @@ export function useApi() {
   }
 
   /**
-   * Send invitation emails for a room (server-side).
-   * Requires backend mail config (MAIL_FROM + RESEND_API_KEY).
+   * Send invitation emails for a room (server-side)
+   * Requires backend mail config (MAIL_FROM + RESEND_API_KEY)
    */
-  async function sendInviteEmail(
-    roomId: string,
-    data: InviteEmailRequest
-  ): Promise<InviteEmailResponse> {
+  async function sendInviteEmail(roomId: string, data: InviteEmailRequest): Promise<InviteEmailResponse> {
     return await $fetch<InviteEmailResponse>(`${baseUrl}/rooms/${roomId}/invite-email`, {
       method: 'POST',
       body: data,
@@ -153,24 +167,25 @@ export function useApi() {
     })
   }
 
-  /**
-   * List all invitations for a room
-   */
-  async function listInvitations(roomId: string): Promise<RoomInvitation[]> {
-    return await $fetch<RoomInvitation[]>(`${baseUrl}/rooms/${roomId}/invites`)
-  }
+    /**
+     * List all invitations for a room
+     */
+    async function listInvitations(roomId: string): Promise<RoomInvitation[]> {
+        return await $fetch<RoomInvitation[]>(`${baseUrl}/rooms/${roomId}/invites`)
+    }
 
     /**
      * Get room media status (publishers & subscribers) for debugging
      */
     async function getMediaStatus(roomId: string): Promise<any> {
         return await $fetch<any>(`${baseUrl}/rooms/${roomId}/media_status`)
-    }
+    }    
 
   return {
     baseUrl,
     createRoom,
     getRoom,
+    listRooms,
     joinRoom,
     leaveRoom,
     getHealth,
@@ -178,7 +193,7 @@ export function useApi() {
     sendInviteEmail,
     getInvitation,
     useInvitation,
-    listInvitations,,
-        getMediaStatus
+    listInvitations,
+    getMediaStatus
   }
 }

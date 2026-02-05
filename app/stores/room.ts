@@ -871,5 +871,5 @@ export const useRoomStore = defineStore('room', () => {
         leaveRoom,
         cleanup,
         getRemoteStream
-    }
+    } 
 })
