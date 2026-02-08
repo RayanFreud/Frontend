@@ -5,38 +5,56 @@ definePageMeta({
 })
 
 import { onBeforeRouteLeave } from 'vue-router'
+import { storeToRefs } from 'pinia'
+
+// ✅ alias : on garde ton tag <VideoGrid /> sans casser ton code
+import RoomGrid from '~/components/RoomGrid.vue'
+const VideoGrid = RoomGrid
+
 const route = useRoute()
 const router = useRouter()
 const roomStore = useRoomStore()
-const toastStore = useToastStore()
+
+// ✅ refs
+const { isJoined, isPublishing, localStream, displayName, isMuted, isVideoOff, participants, publishers, userId } =
+  storeToRefs(roomStore)
 
 const roomId = route.params.id as string
 
-// Check if already joined, if not redirect to lobby
+// ✅ participants array
+const participantsArr = computed(() => Array.from(participants.value.values()))
+
+// ✅ remote participants = tout sauf self
+const remoteParticipants = computed(() => {
+  const me = userId.value
+  return participantsArr.value.filter(p => p.user_id !== me)
+})
+
+// ✅ publishers array (pour mapper user_id -> feed_id)
+const publishersArr = computed(() => Array.from(publishers.value.values()))
+
 onMounted(async () => {
-  if (!roomStore.isJoined) {
+  if (!isJoined.value) {
     router.push(`/room/${roomId}/lobby`)
     return
   }
 
-  // Start publishing when entering the room
   try {
-    await roomStore.startPublishing()
+    if (!isPublishing.value) {
+      await roomStore.startPublishing()
+    }
   } catch (error) {
     console.error('Failed to start publishing:', error)
   }
 })
 
-// Leave room handler
 async function handleLeave() {
   await roomStore.leaveRoom()
   router.push('/')
 }
 
-// Do not cleanup on component unmount (HMR/rehydration can cause spurious unmounts).
-// Instead, perform a deliberate leave (and cleanup) when the user navigates away from the page.
 onBeforeRouteLeave(async () => {
-  if (roomStore.isJoined) {
+  if (isJoined.value) {
     try {
       await roomStore.leaveRoom()
     } catch (e) {
@@ -48,19 +66,20 @@ onBeforeRouteLeave(async () => {
 
 <template>
   <ClientOnly>
-  <div class="h-full flex flex-col">
-    <!-- Video grid -->
-    <div class="flex-1 overflow-hidden pb-24">
-      <VideoGrid
-        :local-stream="roomStore.localStream"
-        :local-display-name="roomStore.displayName"
-        :is-local-muted="roomStore.isMuted"
-        :is-local-video-off="roomStore.isVideoOff"
-      />
-    </div>
+    <div class="h-full flex flex-col">
+      <div class="flex-1 overflow-hidden pb-24">
+        <VideoGrid
+          :local-stream="localStream"
+          :local-display-name="displayName"
+          :is-local-muted="isMuted"
+          :is-local-video-off="isVideoOff"
+          :remote-participants="remoteParticipants"
+          :publishers="publishersArr"
+          :get-remote-stream="roomStore.getRemoteStream"
+        />
+      </div>
 
-    <!-- Controls -->
-    <MediaControls @leave="handleLeave" />
-  </div>
+      <MediaControls @leave="handleLeave" />
+    </div>
   </ClientOnly>
 </template>

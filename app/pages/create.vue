@@ -1,11 +1,9 @@
 <script setup lang="ts">
-definePageMeta({
-  layout: 'default'
-})
+definePageMeta({ layout: 'default' })
 
 const router = useRouter()
-const api = useApi()
 const toastStore = useToastStore()
+const roomStore = useRoomStore()
 
 // State
 const roomName = ref('')
@@ -13,17 +11,33 @@ const maxParticipants = ref(10)
 const enableTranscription = ref(false)
 const isCreating = ref(false)
 
+/**
+ * Store host-only secret locally (creator_key).
+ * - localStorage: durable
+ * - sessionStorage: fallback
+ */
 function setCreatorKey(roomId: string, creatorKey: string) {
+  const key = (creatorKey || '').trim()
+  if (!key) return
+
   try {
-    localStorage.setItem(`tg:creator_key:${roomId}`, creatorKey)
+    localStorage.setItem(`tg:creator_key:${roomId}`, key)
+    sessionStorage.setItem(`tg:creator_key:${roomId}`, key)
+
+    console.log('[Create] Stored creator_key', {
+      roomId,
+      storageKey: `tg:creator_key:${roomId}`,
+      len: key.length
+    })
   } catch (e) {
-    // not fatal; just means host-join without code won't work on this machine
-    console.warn('Failed to store creator key in localStorage', e)
+    // Not fatal; it only means host must recreate meeting if storage is blocked
+    console.warn('[Create] Failed to store creator key in storage', e)
   }
 }
 
 async function handleCreate() {
-  if (!roomName.value.trim()) {
+  const name = roomName.value.trim()
+  if (!name) {
     toastStore.warning('Please enter a meeting name')
     return
   }
@@ -31,19 +45,17 @@ async function handleCreate() {
   isCreating.value = true
 
   try {
-    const room = await api.createRoom({
-      name: roomName.value,
-      max_publishers: maxParticipants.value
-    })
+    // ✅ Use store API for consistency (and centralized future fixes)
+    const room = await roomStore.createRoom(name, maxParticipants.value)
 
-    // store host-only secret locally (MVP)
-    if (room.creator_key) {
-      setCreatorKey(room.room_id, room.creator_key)
-    }
+    // Ensure creator_key is stored (defensive)
+    const ck = (room as any).creator_key as string | undefined
+    if (ck) setCreatorKey(room.room_id, ck)
 
     toastStore.success('Meeting created successfully')
     router.push(`/room/${room.room_id}/lobby`)
   } catch (error) {
+    console.error('[Create] Failed to create meeting:', error)
     toastStore.error('Failed to create meeting')
   } finally {
     isCreating.value = false
@@ -100,6 +112,7 @@ async function handleCreate() {
               <p class="text-sm text-text-secondary">AI will transcribe the meeting</p>
             </div>
           </div>
+
           <button
             type="button"
             :class="[
@@ -127,12 +140,7 @@ async function handleCreate() {
           </div>
         </div>
 
-        <BaseButton
-          class="w-full"
-          size="lg"
-          :loading="isCreating"
-          type="submit"
-        >
+        <BaseButton class="w-full" size="lg" :loading="isCreating" type="submit">
           <Icon name="heroicons:video-camera" class="w-5 h-5" />
           Create Meeting
         </BaseButton>

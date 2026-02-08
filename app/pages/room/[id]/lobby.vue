@@ -1,21 +1,26 @@
 <script setup lang="ts">
 /**
  * Lobby page (pre-join)
- * - Host flow: creator_key (stocké localement sur le device du créateur)
- * - Guest flow: invite_token + invite_code (le token vient du lien, le code est tapé)
+ *
+ * ✅ Host (creator):
+ *  - If the room is empty => allow join WITHOUT creator_key (bootstrap).
+ *  - If the room is NOT empty => require creator_key (rejoin security).
+ *
+ * ✅ Guest:
+ *  - Must have invite_token in URL + invite_code (typed or passed from /invite/:token).
+ *
+ * No demo_mode.
  */
+
 definePageMeta({ layout: 'default' })
 
-// Nuxt deps
 const route = useRoute()
 const router = useRouter()
 
-// Stores / composables
 const roomStore = useRoomStore()
 const api = useApi()
 const toastStore = useToastStore()
 
-// Room id depuis l’URL /room/:id/lobby
 const roomId = route.params.id as string
 
 // UI state
@@ -24,34 +29,39 @@ const roomInfo = ref<any>(null)
 const isLoading = ref(true)
 const isJoining = ref(false)
 
-// Guest flow: token dans l’URL ?token=...
+// Guest flow inputs (from /invite/:token redirect)
 const inviteToken = computed(() => String(route.query.token || '').trim())
-
-// Optionnel: si tu mets ?code=... dans le lien, on pré-remplit.
-// (Mais ton mail n’envoie normalement PAS le code dans l’URL)
 const codeFromLink = computed(() => String(route.query.code || '').trim())
-
-// creator_key stocké localement sur la machine du créateur (host)
-const creatorKey = ref('')
-
-// Code saisi par l’invité (ou pré-rempli depuis l’URL)
 const inviteCode = ref(codeFromLink.value)
 
-// Si token présent => invité
+// Host flow (creator_key stored locally when meeting is created)
+const creatorKey = ref('')
+
+// Guest flow is determined ONLY by token presence
 const isGuestFlow = computed(() => !!inviteToken.value)
 
-// Validation front: on n’autorise Join que si les champs nécessaires sont présents
+// Room empty => host bootstrap allowed
+const isRoomEmpty = computed(() => (roomInfo.value?.participants_count || 0) === 0)
+
+// Button availability rules
 const canJoin = computed(() => {
   if (!displayName.value.trim()) return false
-  if (isGuestFlow.value) return !!inviteToken.value && !!inviteCode.value.trim()
-  return !!creatorKey.value
+
+  if (isGuestFlow.value) {
+    // Guest needs token + code
+    return !!inviteToken.value && !!inviteCode.value.trim()
+  }
+
+  // Host:
+  // - if room empty => OK (bootstrap)
+  // - else => creator_key required
+  return isRoomEmpty.value || !!creatorKey.value.trim()
 })
 
 onMounted(async () => {
   try {
-    // Charge les infos room (nom, participants_count, etc.)
     roomInfo.value = await api.getRoom(roomId)
-  } catch (e) {
+  } catch {
     toastStore.error('Meeting not found')
     router.push('/')
     return
@@ -59,49 +69,60 @@ onMounted(async () => {
     isLoading.value = false
   }
 
-  // Host flow: si creator_key existe sur CE device, on le récupère
-  if (process.client) {
-    creatorKey.value = localStorage.getItem(`tg:creator_key:${roomId}`) || ''
+  // Load creator key if exists (host re-join)
+  if (import.meta.client) {
+    const key = `tg:creator_key:${roomId}`
+    creatorKey.value = localStorage.getItem(key) || sessionStorage.getItem(key) || ''
   }
 })
 
 async function handleJoin() {
-  // Validation display name
-  if (!displayName.value.trim()) {
+  const name = displayName.value.trim()
+  if (!name) {
     toastStore.warning('Please enter your name')
     return
   }
 
   isJoining.value = true
   try {
-    // Guest flow: invite_token + invite_code
+    // Refresh room info quickly (avoid stale count)
+    roomInfo.value = await api.getRoom(roomId)
+
     if (isGuestFlow.value) {
-      if (!inviteToken.value || !inviteCode.value.trim()) {
-        toastStore.error('Invite token + code required')
+      // GUEST
+      const token = inviteToken.value
+      const code = inviteCode.value.trim()
+
+      if (!token || !code) {
+        toastStore.error('Invite token + access code required')
         return
       }
 
-      // IMPORTANT: on passe bien invite_token + invite_code (PAS access_code)
-      await roomStore.joinRoom(roomId, displayName.value.trim(), {
-        invite_token: inviteToken.value,
-        invite_code: inviteCode.value.trim(),
+      await roomStore.joinRoom(roomId, name, {
+        invite_token: token,
+        invite_code: code,
       })
     } else {
-      // Host flow: creator_key
-      if (!creatorKey.value) {
-        toastStore.error('Creator access missing on this device')
-        return
-      }
+      // HOST
+      if (!isRoomEmpty.value) {
+        // Room already has members => rejoin requires creator key
+        const key = creatorKey.value.trim()
+        if (!key) {
+          toastStore.error(
+            'This meeting is already running. Open it on the device that created it (creator key stored), or join using an invite link.'
+          )
+          return
+        }
 
-      await roomStore.joinRoom(roomId, displayName.value.trim(), {
-        creator_key: creatorKey.value,
-      })
+        await roomStore.joinRoom(roomId, name, { creator_key: key })
+      } else {
+        // Room empty => bootstrap join with no key
+        await roomStore.joinRoom(roomId, name, {})
+      }
     }
 
-    // Join OK => redirection vers la room
     router.push(`/room/${roomId}`)
   } catch (error: any) {
-    // Affiche le message backend (ex: Invalid invitation code)
     toastStore.error(error?.data?.error || 'Failed to join meeting')
   } finally {
     isJoining.value = false
@@ -121,13 +142,17 @@ async function handleJoin() {
           <h1 class="text-2xl font-bold text-text-primary mb-2">
             {{ roomInfo?.name || 'Meeting Room' }}
           </h1>
+
           <p class="text-text-secondary">Check your camera and microphone before joining</p>
 
           <p v-if="isGuestFlow" class="mt-2 text-sm text-text-secondary">
             Guest access detected (token + code).
           </p>
+
           <p v-else class="mt-2 text-sm text-text-secondary">
-            Host access detected (creator key on this device).
+            Host access.
+            <span v-if="isRoomEmpty">(Room is empty → you can start it now.)</span>
+            <span v-else>(Room already running → creator key required on this device.)</span>
           </p>
         </div>
 
@@ -146,11 +171,10 @@ async function handleJoin() {
                   icon="heroicons:user"
                 />
 
-                <!-- Guest: code input -->
                 <BaseInput
                   v-if="isGuestFlow"
                   v-model="inviteCode"
-                  label="Invitation Code"
+                  label="Access Code"
                   placeholder="e.g. 761-221"
                   icon="heroicons:key"
                 />
@@ -168,8 +192,7 @@ async function handleJoin() {
                     </span>
                   </div>
 
-                  <!-- Debug light: afficher token si invité -->
-                  <div v-if="isGuestFlow" class="text-xs text-text-secondary">
+                  <div v-if="isGuestFlow" class="text-xs text-text-secondary break-all">
                     Token: {{ inviteToken }}
                   </div>
                 </div>

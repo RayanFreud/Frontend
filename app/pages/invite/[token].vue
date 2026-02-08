@@ -1,96 +1,150 @@
 <script setup lang="ts">
+/**
+ * Invite landing page: /invite/:token
+ *
+ * ✅ DO:
+ *  - GET invitation info from backend
+ *  - Ask user for access code
+ *  - Redirect to room lobby with ?token=...&code=...
+ *
+ * ❌ DO NOT:
+ *  - Call "useInvitation" here (it consumes the invite and makes it 'already used')
+ */
+
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const router = useRouter()
+
 const api = useApi()
 const toastStore = useToastStore()
 
-const token = route.params.token as string
+const token = computed(() => String(route.params.token || '').trim())
 
-const invitationInfo = ref<any>(null)
+// UI state
 const isLoading = ref(true)
-const isError = ref(false)
-const errorMessage = ref('')
-
+const invitation = ref<any>(null)
 const inviteCode = ref('')
+const isContinuing = ref(false)
+
+const isValid = computed(() => !!invitation.value?.is_valid)
+const roomId = computed(() => String(invitation.value?.room_id || '').trim())
+
+// Button enabled only if invite is valid + code entered
+const canContinue = computed(() => isValid.value && !!inviteCode.value.trim())
 
 onMounted(async () => {
+  if (!token.value) {
+    toastStore.error('Missing invite token')
+    router.push('/')
+    return
+  }
+
   try {
-    invitationInfo.value = await api.getInvitation(token)
-    if (!invitationInfo.value.is_valid) {
-      isError.value = true
-      errorMessage.value = 'This invitation link has expired or reached its maximum uses.'
-    }
-  } catch (error: any) {
-    isError.value = true
-    errorMessage.value = error?.data?.error || 'This invitation link is invalid or has expired.'
+    // ✅ Only fetch info. NO consumption.
+    invitation.value = await api.getInvitation(token.value)
+  } catch (err: any) {
+    toastStore.error(err?.data?.error || 'Invitation not found or expired')
+    invitation.value = null
   } finally {
     isLoading.value = false
   }
 })
 
-function formatExpiryDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString()
-}
-
 async function handleContinue() {
-  if (!invitationInfo.value || !invitationInfo.value.is_valid) return
+  if (!canContinue.value) return
 
-  const code = inviteCode.value.trim()
-  if (!code) {
-    toastStore.error('Invite code is required')
-    return
+  isContinuing.value = true
+  try {
+    // ✅ Redirect to lobby with token + code
+    // The real verification + consumption will happen in POST /rooms/:roomId/join
+    router.push(`/room/${roomId.value}/lobby?token=${encodeURIComponent(token.value)}&code=${encodeURIComponent(inviteCode.value.trim())}`)
+  } finally {
+    isContinuing.value = false
   }
-
-  router.push(
-    `/room/${invitationInfo.value.room_id}/lobby?token=${encodeURIComponent(token)}&code=${encodeURIComponent(code)}`
-  )
 }
 </script>
 
 <template>
   <div class="min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-md">
+    <div class="w-full max-w-xl">
       <div v-if="isLoading" class="flex justify-center">
         <LoadingSpinner size="lg" />
       </div>
 
-      <template v-else-if="isError">
-        <BaseCard padding="lg" class="text-center">
-          <h1 class="text-xl font-bold mb-2">Invalid Invitation</h1>
-          <p class="text-text-secondary mb-6">{{ errorMessage }}</p>
-          <BaseButton class="w-full" @click="router.push('/')">Go Home</BaseButton>
-        </BaseCard>
-      </template>
+      <template v-else>
+        <div class="text-center mb-6">
+          <h1 class="text-2xl font-bold text-text-primary">You're invited</h1>
+          <p class="text-text-secondary">
+            Join the meeting using your invite token and access code.
+          </p>
+        </div>
 
-      <template v-else-if="invitationInfo">
         <BaseCard padding="lg">
-          <div class="text-center mb-6">
-            <h1 class="text-xl font-bold mb-2">You're Invited!</h1>
-            <p class="text-text-secondary">Enter the invite code from the email</p>
-          </div>
+          <template v-if="invitation && isValid">
+            <div class="space-y-4">
+              <div class="p-4 rounded-xl bg-bg-elevated space-y-2">
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-text-secondary">Meeting</span>
+                  <span class="text-text-primary font-medium">
+                    {{ invitation.room_name }}
+                  </span>
+                </div>
 
-          <div class="p-4 rounded-xl bg-bg-elevated space-y-3 mb-6">
-            <div class="flex items-center justify-between">
-              <span class="text-text-secondary">Meeting</span>
-              <span class="text-text-primary font-medium">{{ invitationInfo.room_name }}</span>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-text-secondary">Status</span>
+                  <span class="text-text-primary font-medium">
+                    Valid
+                  </span>
+                </div>
+
+                <div class="text-xs text-text-secondary">
+                  Token: {{ token }}
+                </div>
+              </div>
+
+              <BaseInput
+                v-model="inviteCode"
+                label="Access Code"
+                placeholder="Enter the code from your email"
+                icon="heroicons:key"
+              />
+
+              <BaseButton
+                class="w-full"
+                size="lg"
+                :loading="isContinuing"
+                :disabled="!canContinue"
+                @click="handleContinue"
+              >
+                Continue
+              </BaseButton>
+
+              <NuxtLink
+                to="/"
+                class="block text-center text-sm text-text-secondary hover:text-text-primary transition-colors"
+              >
+                Back to home
+              </NuxtLink>
             </div>
-            <div class="flex items-center justify-between">
-              <span class="text-text-secondary">Expires</span>
-              <span class="text-text-primary text-sm">{{ formatExpiryDate(invitationInfo.expires_at) }}</span>
+          </template>
+
+          <template v-else>
+            <div class="space-y-4">
+              <div class="p-4 rounded-xl bg-red-500/10 border border-red-500/30">
+                <p class="text-sm font-medium text-red-400">Invalid invitation</p>
+                <p class="text-sm text-text-secondary">
+                  This invite link is not valid anymore (expired or already used).
+                </p>
+              </div>
+
+              <NuxtLink to="/" class="block">
+                <BaseButton class="w-full" size="lg">
+                  Back to home
+                </BaseButton>
+              </NuxtLink>
             </div>
-          </div>
-
-          <BaseInput
-            v-model="inviteCode"
-            label="Invite Code"
-            placeholder="e.g. 123-456"
-          />
-
-          <BaseButton class="w-full mt-4" size="lg" @click="handleContinue">
-            Continue
-          </BaseButton>
+          </template>
         </BaseCard>
       </template>
     </div>

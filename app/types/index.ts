@@ -74,7 +74,8 @@ export type CreateInvitationResponse = {
   room_id: string
   expires_at: string
   max_uses?: number | null
-  invite_url: string
+  invite_url: String
+  invite_code: string
 }
 
 export type InvitationInfo = {
@@ -107,9 +108,15 @@ export type InviteEmailRequest = {
   message?: string
 }
 
-export type InviteEmailResponse = {
-  sent: number
+export type InviteEmailInvite = {
+  email: string
   token: string
   invite_url: string
+  expires_at: string
+}
+
+export type InviteEmailResponse = {
+  sent: number
   room_id: string
+  invites: InviteEmailInvite[]
 }
